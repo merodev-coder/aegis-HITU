@@ -412,30 +412,44 @@ async function processLogStream(logContent: string, req: Request, res: Response,
   }
 }
 
-router.post("/upload-stream", upload.single("file"), async (req: Request, res: Response): Promise<void> => {
+router.post("/upload-stream", (req: Request, res: Response): void => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
-  try {
-    if (!req.file) {
-      res.write(`data: ${JSON.stringify({ error: "No file uploaded." })}\n\n`);
-      res.end();
-      return;
-    }
-
-    const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
+  upload.single("file")(req, res, async (multerErr: any) => {
     const sendEvent = (data: object) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
-    await processLogStream(logContent, req, res, sendEvent, req.file.originalname);
-  } catch (error: unknown) {
-    res.write(`data: ${JSON.stringify({ error: "Upload stream processing failed." })}\n\n`);
-    res.end();
-  }
+    if (multerErr) {
+      console.error("[Multer Error]", multerErr.message);
+      sendEvent({ type: "error", message: multerErr.message || "File upload rejected." });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    try {
+      if (!req.file || !req.file.buffer) {
+        sendEvent({ type: "error", message: "No file uploaded." });
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
+      }
+
+      const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
+      await processLogStream(logContent, req, res, sendEvent, req.file.originalname);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error("[Upload Stream Error]", errMsg);
+      sendEvent({ type: "error", message: "Upload stream processing failed." });
+      res.write("data: [DONE]\n\n");
+      res.end();
+    }
+  });
 });
 
 function isPrivateIp(ip: string): boolean {
