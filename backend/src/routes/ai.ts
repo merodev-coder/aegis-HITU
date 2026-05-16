@@ -207,28 +207,39 @@ Keep the content technically precise, actionable, and evidence-based.`;
 });
 
 router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
-
   try {
     const { input, context } = req.body;
 
     if (!input || typeof input !== "string" || !input.trim()) {
-      res.write(`data: ${JSON.stringify({ error: "Input content is required." })}\n\n`);
-      res.end();
+      res.status(400).json({ error: "Input content is required." });
       return;
     }
 
     if (context && typeof context !== "string") {
-      res.write(`data: ${JSON.stringify({ error: "Invalid context type." })}\n\n`);
-      res.end();
+      res.status(400).json({ error: "Invalid context type." });
       return;
     }
 
     const systemPrompt = getSystemPrompt(context || "default");
+    const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: sanitizeForLlm(String(input).trim()) },
+    ];
+
+    let streamBody;
+    try {
+      streamBody = await fetchGroqStream(messages);
+    } catch (fetchErr) {
+      console.error("[Groq Fetch Error]", fetchErr);
+      res.status(500).json({ error: "AI failed" });
+      return;
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
 
     const sendEvent = (data: object) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -236,11 +247,6 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
 
     sendEvent({ type: "status", message: `Using ${context || "default"} analysis strategy...` });
 
-    const messages = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: sanitizeForLlm(String(input).trim()) },
-    ];
-    const streamBody = await fetchGroqStream(messages);
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
     let fullResponse = "";
@@ -282,9 +288,13 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[AI Analyze Error]", errMsg);
-    res.write(`data: ${JSON.stringify({ type: "error", message: "AI service connection failed." })}\n\n`);
-    res.write("data: [DONE]\n\n");
-    res.end();
+    if (!res.headersSent) {
+      res.status(500).json({ error: "AI service connection failed." });
+    } else {
+      res.write(`data: ${JSON.stringify({ type: "error", message: "AI service connection failed." })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    }
   }
 });
 
