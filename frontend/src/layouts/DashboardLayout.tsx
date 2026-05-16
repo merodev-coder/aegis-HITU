@@ -112,9 +112,7 @@ export default function DashboardLayout() {
               <Scanner />
             </TabPanel>
             <TabPanel path="/dashboard/ai-training" activePath={path}>
-              <RequireRole allowed={["admin"]}>
-                <AITraining />
-              </RequireRole>
+              <AITraining />
             </TabPanel>
             <TabPanel path="/dashboard/ai-chat" activePath={path}>
               <AIChat />

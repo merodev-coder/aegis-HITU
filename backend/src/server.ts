@@ -52,7 +52,7 @@ app.use("/api/ai", requireAuth, aiRoutes);
 app.use("/api/logs", requireAuth, logRoutes);
 app.use("/api/alerts", requireAuth, alertRoutes);
 app.use("/api/scanner", requireAuth, scannerRoutes);
-app.use("/api/training", requireAuth, trainingRoutes);
+app.use("/api/training", trainingRoutes);
 app.use("/api/overview", requireAuth, overviewRoutes);
 
 app.get("/api/health", (_req: Request, res: Response) => {

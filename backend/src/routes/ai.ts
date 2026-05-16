@@ -42,7 +42,6 @@ async function fetchGroqStream(messages: any[]): Promise<any> {
   return response.body;
 }
 
-
 function sanitizeForLlm(input: string): string {
   const patterns = [
     /ignore\s+(all\s+)?previous\s+instructions/gi,
@@ -102,11 +101,8 @@ function buildThreatDescription(prompt: string): string {
 }
 
 const PROMPT_STRATEGIES: Record<string, string> = {
-
   "live-alerts": `You are Aegis AI SIEM Agent. Your only job is to analyze this specific real-time alert line for immediate threats. Be concise. Identify the threat type (e.g., SQLi attempt, Bruteforce) and give a 1-sentence risk assessment. DO NOT rewrite code or analyze large logs. Output Format: Threat Type, Severity (Critical/High/Medium/Low), Risk Assessment (1 sentence).`,
-
   "log-analyzer": `You are Aegis AI SIEM Log Analyzer. Analyze the provided log block for security patterns, attack chains, or anomalies. Summarize detected activities. If malicious behavior is found, correlate entries to describe the attack flow. Output should be an analytical report with sections: Executive Summary, Detected Threats, Attack Chain Analysis (if applicable), Recommendations.`,
-
   "code-scanner": `You are Aegis AI Secure Coding Agent. Your goal is to function as an automated secure code reviewer and generator.
 STEP 1: Analyze the input code for OWASP Top 10 vulnerabilities (e.g., XSS, SQLi, Prototype Pollution, Insecure Deserialization, Broken Access Control). Clearly list every detected vulnerability with its CWE ID if applicable.
 STEP 2: Provide a complete, fully rewritten, secure version of the code snippet. Focus on using secure libraries, input sanitization, parameterized queries, and output encoding.
@@ -114,7 +110,6 @@ Output format must be structured Markdown with:
 - A "## Vulnerabilities Detected" section listing each issue
 - A "## Secure Code" section with the full fixed code in a syntax-highlighted code block
 - A "## Changes Made" section summarizing what was fixed and why`,
-
   "phishing-analyzer": `You are Aegis AI Phishing Expert. Analyze the provided email content for phishing attempts, social engineering, and malicious intent. 
 You must strictly return ONLY a JSON response in the following format, with no markdown formatting outside the JSON, and no backticks around the JSON.
 {
@@ -123,7 +118,6 @@ You must strictly return ONLY a JSON response in the following format, with no m
   "recommendation": "<string>"
 }
 Do not include any extra text.`,
-
   default: `You are Aegis AI, an expert cybersecurity SIEM assistant. Provide concise, highly technical, and accurate responses. You monitor logs, analyze threats (like SQLi, XSS, etc.), and help the user secure their infrastructure.`,
 };
 
@@ -132,11 +126,20 @@ function getSystemPrompt(context: string): string {
 }
 
 router.post("/chat", async (req: Request, res: Response): Promise<void> => {
+  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
   try {
     const { message } = req.body;
 
     if (!message) {
-      res.status(400).json({ error: "Message is required." });
+      res.write(`data: ${JSON.stringify({ error: "Message is required." })}\n\n`);
+      res.end();
       return;
     }
 
@@ -166,11 +169,6 @@ Keep the content technically precise, actionable, and evidence-based.`;
       { role: "user", content: userMessage },
     ];
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders();
-
     const streamBody = await fetchGroqStream(messages);
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
@@ -197,36 +195,36 @@ Keep the content technically precise, actionable, and evidence-based.`;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[Groq Error]", errMsg);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Failed to communicate with AI service." });
-    } else {
-      res.write(`data: ${JSON.stringify({ error: "Connection interrupted." })}\n\n`);
-      res.end();
-    }
+    res.write(`data: ${JSON.stringify({ error: "Connection interrupted or failed." })}\n\n`);
+    res.end();
   }
 });
 
 router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
+  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
   try {
     const { input, context } = req.body;
 
     if (!input || typeof input !== "string" || !input.trim()) {
-      res.status(400).json({ error: "Input content is required." });
+      res.write(`data: ${JSON.stringify({ error: "Input content is required." })}\n\n`);
+      res.end();
       return;
     }
 
     if (context && typeof context !== "string") {
-      res.status(400).json({ error: "Invalid context type." });
+      res.write(`data: ${JSON.stringify({ error: "Invalid context type." })}\n\n`);
+      res.end();
       return;
     }
 
     const systemPrompt = getSystemPrompt(context || "default");
-
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
 
     const sendEvent = (data: object) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -272,17 +270,9 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[AI Analyze Error]", errMsg);
-
-    if (res.headersSent) {
-      const sendEvent = (data: object) => {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-      };
-      sendEvent({ type: "error", message: "AI service connection failed." });
-      res.write("data: [DONE]\n\n");
-      res.end();
-    } else {
-      res.status(500).json({ error: "Failed to communicate with AI service." });
-    }
+    res.write(`data: ${JSON.stringify({ type: "error", message: "AI service connection failed." })}\n\n`);
+    res.write("data: [DONE]\n\n");
+    res.end();
   }
 });
 
@@ -305,8 +295,8 @@ router.post("/analyze-phishing", async (req: Request, res: Response): Promise<vo
 
     let jsonString = response.choices[0]?.message?.content || "";
 
-    if (jsonString.startsWith("\`\`\`json")) {
-      jsonString = jsonString.replace(/^\`\`\`json\s*/, "").replace(/\s*\`\`\`$/, "");
+    if (jsonString.startsWith("```json")) {
+      jsonString = jsonString.replace(/^```json\s*/, "").replace(/\s*```$/, "");
     }
 
     const parsedResponse = JSON.parse(jsonString);

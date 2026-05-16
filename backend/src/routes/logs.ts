@@ -64,7 +64,6 @@ async function fetchGroqStream(messages: any[]): Promise<any> {
   return response.body;
 }
 
-
 function sanitizeForLlm(input: string): string {
   const patterns = [
     /ignore\s+(all\s+)?previous\s+instructions/gi,
@@ -313,8 +312,8 @@ async function processLogStream(logContent: string, req: Request, res: Response,
         if (done) break;
         const decoded = decoder.decode(value, { stream: true });
         
-        const lines = decoded.split('\n');
-        for (const line of lines) {
+        const decodedLines = decoded.split('\n');
+        for (const line of decodedLines) {
           if (!line.trim().startsWith("data: ")) continue;
           const dataStr = line.replace("data: ", "").trim();
           if (dataStr === "[DONE]") break;
@@ -406,24 +405,31 @@ async function processLogStream(logContent: string, req: Request, res: Response,
 }
 
 router.post("/upload-stream", upload.single("file"), async (req: Request, res: Response): Promise<void> => {
-  if (!req.file) {
-    res.status(400).json({ error: "No file uploaded." });
-    return;
-  }
-
-  const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
-
+  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  const sendEvent = (data: object) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+  try {
+    if (!req.file) {
+      res.write(`data: ${JSON.stringify({ error: "No file uploaded." })}\n\n`);
+      res.end();
+      return;
+    }
 
-  await processLogStream(logContent, req, res, sendEvent, req.file.originalname);
+    const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
+    const sendEvent = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    await processLogStream(logContent, req, res, sendEvent, req.file.originalname);
+  } catch (error: unknown) {
+    res.write(`data: ${JSON.stringify({ error: "Upload stream processing failed." })}\n\n`);
+    res.end();
+  }
 });
 
 function isPrivateIp(ip: string): boolean {
@@ -485,29 +491,33 @@ async function isAllowedUrl(input: string): Promise<boolean> {
 }
 
 router.post("/scan-url-stream", async (req: Request, res: Response): Promise<void> => {
-  const { url } = req.body;
-  if (!url || typeof url !== "string") {
-    res.status(400).json({ error: "No URL provided." });
-    return;
-  }
-
-  const allowed = await isAllowedUrl(url);
-  if (!allowed) {
-    res.status(400).json({ error: "Invalid or blocked URL. Only public HTTP(S) URLs are allowed." });
-    return;
-  }
-
+  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  const sendEvent = (data: object) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
   try {
+    const { url } = req.body;
+    if (!url || typeof url !== "string") {
+      res.write(`data: ${JSON.stringify({ error: "No URL provided." })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const allowed = await isAllowedUrl(url);
+    if (!allowed) {
+      res.write(`data: ${JSON.stringify({ error: "Invalid or blocked URL. Only public HTTP(S) URLs are allowed." })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const sendEvent = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     sendEvent({ type: "status", message: "Fetching remote logs..." });
     const fetchResponse = await fetch(url);
     if (!fetchResponse.ok) {
@@ -546,8 +556,7 @@ router.post("/scan-url-stream", async (req: Request, res: Response): Promise<voi
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[Scan URL Error]", errMsg);
-    sendEvent({ type: "error", message: `Error fetching URL: ${errMsg}` });
-    res.write("data: [DONE]\n\n");
+    res.write(`data: ${JSON.stringify({ error: `Error processing URL stream: ${errMsg}` })}\n\n`);
     res.end();
   }
 });

@@ -1,21 +1,15 @@
 import { Router, Request, Response } from "express";
 import mongoose from "mongoose";
 import Threat from "../models/Threat";
-import { requireRole, AuthRequest } from "../middlewares/auth";
 
 const router = Router();
 
-/**
- * GET /api/training/pending
- * Fetches all threats with reviewStatus === "PENDING", grouped by source.
- */
-router.get("/pending", requireRole("admin", "analyst"), async (_req: Request, res: Response) => {
+router.get("/pending", async (_req: Request, res: Response) => {
   try {
     const threats = await Threat.find({ reviewStatus: "PENDING" })
       .sort({ createdAt: -1 })
       .lean();
 
-    // Group by source
     const grouped: Record<string, any[]> = { LOG: [], CODE: [], EMAIL: [], CHAT: [] };
     for (const t of threats) {
       const key = t.source as string;
@@ -31,14 +25,8 @@ router.get("/pending", requireRole("admin", "analyst"), async (_req: Request, re
   }
 });
 
-/**
- * POST /api/training/review
- * Body: { threatId: string, newStatus: "CONFIRMED" | "FALSE_POSITIVE" }
- * Updates the review status of a specific threat in the database.
- */
-router.post("/review", requireRole("admin"), async (req: Request, res: Response): Promise<void> => {
+router.post("/review", async (req: Request, res: Response): Promise<void> => {
   try {
-    const authReq = req as AuthRequest;
     const { threatId, newStatus } = req.body;
 
     if (!threatId || typeof threatId !== "string" || !mongoose.Types.ObjectId.isValid(threatId)) {
@@ -55,7 +43,7 @@ router.post("/review", requireRole("admin"), async (req: Request, res: Response)
       new mongoose.Types.ObjectId(threatId),
       { 
         reviewStatus: newStatus,
-        reviewedBy: authReq.userId,
+        reviewedBy: "public-user",
         reviewedAt: new Date()
       },
       { new: true }
