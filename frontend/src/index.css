@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Aegis AI — Design System Tokens (Tailwind CSS v4)
+   Colors sourced from context.md §3.1
+   ========================================================================== */
+
+@theme {
+  /* ── Background & Surface ─────────────────────────────────────────────── */
+  --color-aegis-bg: #050505;
+  --color-aegis-surface: #111318;
+
+  /* ── Primary Accent ────────────────────────────────────────────────────── */
+  --color-aegis-primary: #00d4c3;
+  --color-aegis-primary-dim: #00a89b;
+
+  /* ── Text ──────────────────────────────────────────────────────────────── */
+  --color-aegis-text: #f4f6fb;
+  --color-aegis-muted: #a6acb8;
+
+  /* ── Status / Alert Colors ─────────────────────────────────────────────── */
+  --color-aegis-critical: #ff3b30;
+  --color-aegis-warning: #ff9500;
+  --color-aegis-medium: #ffcc00;
+  --color-aegis-success: #00d4c3;
+
+  /* ── Typography ────────────────────────────────────────────────────────── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ==========================================================================
+   Global base styles
+   ========================================================================== */
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-aegis-bg);
+  color: var(--color-aegis-text);
+  font-family: var(--font-sans);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Lenis overrides — Lenis sets overflow:hidden on html when active.
+   This is fine for landing pages but must NOT leak into the dashboard
+   which uses its own internal overflow containers.
+   ───────────────────────────────────────────────────────────────────────── */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+html.lenis.lenis-stopped,
+html.lenis.lenis-stopped body {
+  overflow: hidden;
+}
+
+/* Scrollbar styling for the cyber aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-aegis-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-aegis-primary-dim);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-aegis-primary);
+}
+
+/* Selection highlight */
+::selection {
+  background-color: color-mix(in srgb, var(--color-aegis-primary) 30%, transparent);
+  color: var(--color-aegis-text);
+}
