@@ -4,7 +4,6 @@ import Sidebar from "../components/Sidebar";
 import AnimatedBackground from "../components/ui/AnimatedBackground";
 import { useAuthStore } from "../store/authStore";
 
-
 import Overview from "../pages/Overview";
 import FolderScanner from "../pages/FolderScanner";
 import LogAnalyzer from "../pages/LogAnalyzer";
@@ -12,11 +11,6 @@ import Scanner from "../pages/Scanner";
 import AITraining from "../pages/AITraining";
 import AIChat from "../pages/AIChat";
 import PhishingAnalyzer from "../pages/PhishingAnalyzer";
-
-
-
-
-
 
 function TabPanel({
   path,
@@ -31,12 +25,13 @@ function TabPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollPosRef = useRef(0);
 
-  
   useEffect(() => {
     if (active && scrollRef.current) {
       scrollRef.current.scrollTop = scrollPosRef.current;
     }
   }, [active]);
+
+  if (!active) return null;
 
   return (
     <div
@@ -57,18 +52,20 @@ function TabPanel({
   );
 }
 
-
-
-
 function RequireRole({ allowed, children }: { allowed: string[]; children: React.ReactNode }) {
   const { user, isAuthLoading } = useAuthStore();
   
   if (isAuthLoading) {
-    return <div className="flex h-screen items-center justify-center">Verifying secure session...</div>;
+    return <div className="flex h-screen items-center justify-center text-aegis-primary">Verifying secure session...</div>;
   }
 
   if (!user || !allowed.includes(user.role)) {
-    return <Navigate to="/dashboard/overview" replace />;
+    return (
+      <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+        <h2 className="text-xl font-bold text-aegis-text">Access Denied</h2>
+        <p className="mt-2 text-sm text-aegis-muted">You do not have permission to view this page.</p>
+      </div>
+    );
   }
   return <>{children}</>;
 }
@@ -82,7 +79,7 @@ export default function DashboardLayout() {
   }, [verifySession]);
 
   if (isAuthLoading) {
-    return <div className="flex h-screen items-center justify-center">Verifying secure session...</div>;
+    return <div className="flex h-screen items-center justify-center text-aegis-primary">Verifying secure session...</div>;
   }
 
   if (!user) {

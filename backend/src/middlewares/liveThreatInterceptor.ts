@@ -1,9 +1,45 @@
 import { Request, Response, NextFunction } from "express";
-import Groq from "groq-sdk";
 import Alert from "../models/Alert";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const AI_MODEL = "llama3-8b-8192";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
+  const body: any = { model: AI_MODEL, messages, stream: false };
+  if (jsonFormat) body.response_format = { type: "json_object" };
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.json();
+}
+
+async function fetchGroqStream(messages: any[]): Promise<any> {
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify({ model: AI_MODEL, messages, stream: true })
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.body;
+}
+
 
 const EXCLUDED_PATHS = [
   "/api/health",
@@ -62,15 +98,11 @@ BODY: ${requestData.body}`;
 
   (async () => {
     try {
-      const response = await groq.chat.completions.create({
-        model: AI_MODEL,
-        messages: [
+      const messages = [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: requestString },
-        ],
-        response_format: { type: "json_object" },
-        stream: false,
-      });
+      ];
+      const response = await fetchGroq(messages, true);
 
       const aiText = (response.choices[0]?.message?.content || "").trim();
       if (!aiText) return;

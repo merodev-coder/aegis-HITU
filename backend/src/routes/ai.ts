@@ -1,11 +1,47 @@
 import { Router, Request, Response } from "express";
-import Groq from "groq-sdk";
 import Threat from "../models/Threat";
 
 const router = Router();
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const AI_MODEL = "llama3-8b-8192";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
+  const body: any = { model: AI_MODEL, messages, stream: false };
+  if (jsonFormat) body.response_format = { type: "json_object" };
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.json();
+}
+
+async function fetchGroqStream(messages: any[]): Promise<any> {
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify({ model: AI_MODEL, messages, stream: true })
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.body;
+}
+
 
 function sanitizeForLlm(input: string): string {
   const patterns = [
@@ -125,7 +161,7 @@ Return your response in clean Markdown with exactly these top-level sections:
 ## Remediation
 Keep the content technically precise, actionable, and evidence-based.`;
 
-    const messages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
+    const messages = [
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
     ];
@@ -135,16 +171,24 @@ Keep the content technically precise, actionable, and evidence-based.`;
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
 
-    const stream = await groq.chat.completions.create({
-      model: AI_MODEL,
-      messages,
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || "";
-      if (content) {
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+    const streamBody = await fetchGroqStream(messages);
+    const reader = streamBody.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const lines = decoder.decode(value, { stream: true }).split('\n');
+      for (const line of lines) {
+        if (!line.trim().startsWith("data: ")) continue;
+        const dataStr = line.replace("data: ", "").trim();
+        if (dataStr === "[DONE]") break;
+        try {
+          const chunk = JSON.parse(dataStr);
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          }
+        } catch (e) {}
       }
     }
 
@@ -190,22 +234,30 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
 
     sendEvent({ type: "status", message: `Using ${context || "default"} analysis strategy...` });
 
-    const stream = await groq.chat.completions.create({
-      model: AI_MODEL,
-      messages: [
+    const messages = [
         { role: "system", content: systemPrompt },
         { role: "user", content: sanitizeForLlm(String(input).trim()) },
-      ],
-      stream: true,
-    });
-
+    ];
+    const streamBody = await fetchGroqStream(messages);
+    const reader = streamBody.getReader();
+    const decoder = new TextDecoder();
     let fullResponse = "";
-
-    for await (const chunk of stream) {
-      const text = chunk.choices[0]?.delta?.content || "";
-      if (text) {
-        fullResponse += text;
-        sendEvent({ type: "chunk", content: text });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const lines = decoder.decode(value, { stream: true }).split('\n');
+      for (const line of lines) {
+        if (!line.trim().startsWith("data: ")) continue;
+        const dataStr = line.replace("data: ", "").trim();
+        if (dataStr === "[DONE]") break;
+        try {
+          const chunk = JSON.parse(dataStr);
+          const text = chunk.choices[0]?.delta?.content || "";
+          if (text) {
+            fullResponse += text;
+            sendEvent({ type: "chunk", content: text });
+          }
+        } catch (e) {}
       }
     }
 
@@ -245,15 +297,11 @@ router.post("/analyze-phishing", async (req: Request, res: Response): Promise<vo
 
     const systemPrompt = getSystemPrompt("phishing-analyzer");
 
-    const response = await groq.chat.completions.create({
-      model: AI_MODEL,
-      messages: [
+    const messages = [
         { role: "system", content: systemPrompt },
         { role: "user", content: sanitizeForLlm(String(email).trim()) },
-      ],
-      response_format: { type: "json_object" },
-      stream: false,
-    });
+    ];
+    const response = await fetchGroq(messages, true);
 
     let jsonString = response.choices[0]?.message?.content || "";
 

@@ -3,7 +3,6 @@ import multer from "multer";
 import path from "path";
 import dns from "dns/promises";
 import net from "net";
-import Groq from "groq-sdk";
 import Alert from "../models/Alert";
 import Threat from "../models/Threat";
 
@@ -26,8 +25,45 @@ const upload = multer({
   },
 });
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const AI_MODEL = "llama3-8b-8192";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
+  const body: any = { model: AI_MODEL, messages, stream: false };
+  if (jsonFormat) body.response_format = { type: "json_object" };
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.json();
+}
+
+async function fetchGroqStream(messages: any[]): Promise<any> {
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify({ model: AI_MODEL, messages, stream: true })
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.body;
+}
+
 
 function sanitizeForLlm(input: string): string {
   const patterns = [
@@ -195,15 +231,11 @@ router.post("/upload", upload.single("file"), async (req: Request, res: Response
 
     const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
 
-    const response = await groq.chat.completions.create({
-      model: AI_MODEL,
-      messages: [
+    const messages = [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: logContent },
-      ],
-      response_format: { type: "json_object" },
-      stream: false,
-    });
+    ];
+    const response = await fetchGroq(messages, true);
 
     let aiText = (response.choices[0]?.message?.content || "").trim();
 
@@ -266,22 +298,32 @@ async function processLogStream(logContent: string, req: Request, res: Response,
 
       sendEvent({ type: "status", message: `Analyzing lines ${i + 1} to ${Math.min(i + BATCH_SIZE, lines.length)} of ${lines.length}...` });
 
-      const messages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
+      const messages = [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: batchContent },
       ];
 
-      const stream = await groq.chat.completions.create({
-        model: AI_MODEL,
-        messages,
-        stream: true,
-      });
-
+      const streamBody = await fetchGroqStream(messages);
+      const reader = streamBody.getReader();
+      const decoder = new TextDecoder();
       let buffer = "";
 
-      for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content || "";
-        buffer += text;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const decoded = decoder.decode(value, { stream: true });
+        
+        const lines = decoded.split('\n');
+        for (const line of lines) {
+          if (!line.trim().startsWith("data: ")) continue;
+          const dataStr = line.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") break;
+          try {
+            const chunk = JSON.parse(dataStr);
+            const text = chunk.choices[0]?.delta?.content || "";
+            buffer += text;
+          } catch (e) {}
+        }
 
         let startIdx = buffer.indexOf('{');
         while (startIdx !== -1) {

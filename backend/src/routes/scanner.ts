@@ -1,11 +1,47 @@
 import { Router, Request, Response } from "express";
-import Groq from "groq-sdk";
 import ignore from "ignore";
 import Threat from "../models/Threat";
 
 const router = Router();
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const AI_MODEL = "llama3-8b-8192";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
+  const body: any = { model: AI_MODEL, messages, stream: false };
+  if (jsonFormat) body.response_format = { type: "json_object" };
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.json();
+}
+
+async function fetchGroqStream(messages: any[]): Promise<any> {
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify({ model: AI_MODEL, messages, stream: true })
+  });
+  if (!response.ok) {
+    let errText = "";
+    try { errText = await response.text(); } catch(e) {}
+    throw new Error(`Groq API Error ${response.status}: ${errText}`);
+  }
+  return response.body;
+}
+
 
 interface FilePayload {
   path: string;
@@ -81,17 +117,13 @@ Return ONLY a JSON object matching this schema:
   "analysis": string (1-2 sentences summarizing the finding)
 }`;
 
-        const response = await groq.chat.completions.create({
-          model: AI_MODEL,
-          messages: [
+        const messages = [
             { role: "system", content: systemPrompt },
             { role: "user", content: `File: ${file.path}\n\nContent:\n${file.content}` }
-          ],
-          response_format: { type: "json_object" },
-          stream: false,
-        });
+        ];
+        const response = await fetchGroq(messages, true);
 
-        const rawContent = response.choices[0]?.message?.content || "{}";
+        const rawContent = response.choices?.[0]?.message?.content || "{}";
         const result = JSON.parse(rawContent);
 
         if (result.hasVulnerability && result.severity !== "None") {
