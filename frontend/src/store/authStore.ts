@@ -39,10 +39,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
         const data = await response.json();
         set({ user: data.user, isAuthLoading: false });
       } else {
-        set({ user: null, isAuthLoading: false });
+        set({ isAuthLoading: false });
       }
     } catch {
-      set({ user: null, isAuthLoading: false });
+      set({ isAuthLoading: false });
     }
   },
 }));

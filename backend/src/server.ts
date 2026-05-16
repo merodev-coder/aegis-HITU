@@ -50,7 +50,7 @@ app.use("/api/logs", logRoutes);
 app.use("/api/alerts", requireAuth, alertRoutes);
 app.use("/api/scanner", scannerRoutes);
 app.use("/api/training", trainingRoutes);
-app.use("/api/overview", requireAuth, overviewRoutes);
+app.use("/api/overview", overviewRoutes);
 
 app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({
