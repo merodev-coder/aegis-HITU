@@ -173,13 +173,14 @@ export default function LogAnalyzer() {
       setPhase("streaming");
       setStatusMessage("Connecting to AI engine...");
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
+      const fileContent = await selectedFile.text();
 
       const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
       const response = await fetch(`${API_URL}/api/logs/upload-stream`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logData: fileContent, fileName: selectedFile.name }),
+        credentials: "omit",
         signal: controller.signal,
       });
 

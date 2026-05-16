@@ -420,44 +420,38 @@ router.options("/upload-stream", (_req: Request, res: Response) => {
   res.status(204).end();
 });
 
-router.post("/upload-stream", (req: Request, res: Response): void => {
+router.post("/upload-stream", async (req: Request, res: Response): Promise<void> => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  upload.single("file")(req, res, async (multerErr: any) => {
-    const sendEvent = (data: object) => {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
+  const sendEvent = (data: object) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
-    if (multerErr) {
-      console.error("[Multer Error]", multerErr.message);
-      sendEvent({ type: "error", message: multerErr.message || "File upload rejected." });
+  try {
+    const logData = req.body?.logData;
+    const fileName = req.body?.fileName || "Uploaded Log";
+
+    if (!logData || typeof logData !== "string" || !logData.trim()) {
+      sendEvent({ type: "error", message: "No log data provided." });
       res.write("data: [DONE]\n\n");
       res.end();
       return;
     }
 
-    try {
-      if (!req.file || !req.file.buffer) {
-        sendEvent({ type: "error", message: "No file uploaded." });
-        res.write("data: [DONE]\n\n");
-        res.end();
-        return;
-      }
-
-      const logContent = sanitizeForLlm(req.file.buffer.toString("utf-8"));
-      await processLogStream(logContent, req, res, sendEvent, req.file.originalname);
-    } catch (error: unknown) {
-      const errMsg = error instanceof Error ? error.message : "Unknown error";
-      console.error("[Upload Stream Error]", errMsg);
-      sendEvent({ type: "error", message: "Upload stream processing failed." });
-      res.write("data: [DONE]\n\n");
-      res.end();
-    }
-  });
+    const logContent = sanitizeForLlm(logData);
+    await processLogStream(logContent, req, res, sendEvent, fileName);
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[Upload Stream Error]", errMsg);
+    sendEvent({ type: "error", message: "Upload stream processing failed." });
+    res.write("data: [DONE]\n\n");
+    res.end();
+  }
 });
 
 function isPrivateIp(ip: string): boolean {
