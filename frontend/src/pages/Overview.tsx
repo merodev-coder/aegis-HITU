@@ -70,7 +70,7 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch("/api/overview/stats", { credentials: "include" })
+    apiFetch("/api/overview/stats")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch stats");
         return res.json();
