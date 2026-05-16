@@ -96,7 +96,6 @@ export default function AIChat() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({ message: userMessage.content }),
       });
 

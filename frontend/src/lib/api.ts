@@ -26,7 +26,6 @@ export async function apiFetch(
   try {
     const response = await fetch(url, {
       ...options,
-      credentials: "include",
       signal: options.signal || controller?.signal,
     });
 

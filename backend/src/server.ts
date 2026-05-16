@@ -48,10 +48,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(liveThreatInterceptor);
 
 app.use("/api/auth", authRoutes);
-app.use("/api/ai", requireAuth, aiRoutes);
-app.use("/api/logs", requireAuth, logRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/logs", logRoutes);
 app.use("/api/alerts", requireAuth, alertRoutes);
-app.use("/api/scanner", requireAuth, scannerRoutes);
+app.use("/api/scanner", scannerRoutes);
 app.use("/api/training", trainingRoutes);
 app.use("/api/overview", requireAuth, overviewRoutes);
 
