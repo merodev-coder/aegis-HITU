@@ -3,7 +3,7 @@ import Threat from "../models/Threat";
 
 const router = Router();
 
-const AI_MODEL = "llama3-8b-8192";
+const AI_MODEL = "llama-3.3-70b-versatile";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {

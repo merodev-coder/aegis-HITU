@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import Alert from "../models/Alert";
 
-const AI_MODEL = "llama3-8b-8192";
+const AI_MODEL = "llama-3.3-70b-versatile";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
