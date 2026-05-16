@@ -29,16 +29,30 @@ if (!process.env.JWT_SECRET) {
 connectDB();
 
 const app = express();
+
 app.use(cors({
   origin: '*',
-  credentials: false
+  credentials: false,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+app.options('*', cors());
+
 const PORT = process.env.PORT || 5000;
 
 app.set("trust proxy", false);
 
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+}));
 app.use(cookieParser());
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Accel-Buffering', 'no');
+  next();
+});
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
