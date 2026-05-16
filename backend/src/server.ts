@@ -19,7 +19,6 @@ import { liveThreatInterceptor } from "./middlewares/liveThreatInterceptor";
 import { requireAuth } from "./middlewares/auth";
 import connectDB from "./config/db";
 
-
 dotenv.config();
 
 if (!process.env.JWT_SECRET) {
@@ -34,35 +33,32 @@ const PORT = process.env.PORT || 5000;
 
 app.set("trust proxy", false);
 
+const allowedOrigins = [
+  "https://aegis-ai-hitu.netlify.app",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
 
-
-
-app.use(helmet());
-app.use(cookieParser());
-const ALLOWED_ORIGIN = process.env.CLIENT_URL;
-if (!ALLOWED_ORIGIN) {
-  console.warn("WARNING: CLIENT_URL is not set. CORS will reject all cross-origin requests.");
-}
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || origin === ALLOWED_ORIGIN) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   })
 );
+
+app.use(helmet());
+app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-
 app.use(liveThreatInterceptor);
-
-
-
 
 app.use("/api/auth", authRoutes);
 app.use("/api/ai", requireAuth, aiRoutes);
@@ -72,7 +68,6 @@ app.use("/api/scanner", requireAuth, scannerRoutes);
 app.use("/api/training", requireAuth, trainingRoutes);
 app.use("/api/overview", requireAuth, overviewRoutes);
 
-
 app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({
     status: "operational",
@@ -81,15 +76,9 @@ app.get("/api/health", (_req: Request, res: Response) => {
   });
 });
 
-
-
-
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ message: "Route not found" });
 });
-
-
-
 
 interface AppError extends Error {
   statusCode?: number;
@@ -108,14 +97,11 @@ app.use((err: AppError, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-
-
-
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    methods: ["GET", "POST"],
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
   },
 });
@@ -156,7 +142,6 @@ io.on("connection", (socket) => {
     console.log(`[Socket.io] Client disconnected: ${socket.id}`);
   });
 });
-
 
 httpServer.listen(PORT, () => {
   console.log(`\n⚡ Aegis AI Backend running on http://localhost:${PORT}`);
