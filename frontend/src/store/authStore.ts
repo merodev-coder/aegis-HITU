@@ -28,13 +28,12 @@ export const useAuthStore = create<AuthState>()((set) => ({
     set({ user: null, isAuthLoading: false });
     apiFetch("/api/auth/logout", {
       method: "POST",
-      credentials: "include",
     }).catch(() => {});
   },
 
   verifySession: async () => {
     try {
-      const response = await apiFetch("/api/auth/me", { credentials: "include" });
+      const response = await apiFetch("/api/auth/me");
       if (response.ok) {
         const data = await response.json();
         set({ user: data.user, isAuthLoading: false });
