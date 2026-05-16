@@ -175,7 +175,9 @@ export default function LogAnalyzer() {
 
       const formData = new FormData();
       formData.append("file", selectedFile);
-      const response = await apiFetch("/api/logs/upload-stream", {
+
+      const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+      const response = await fetch(`${API_URL}/api/logs/upload-stream`, {
         method: "POST",
         body: formData,
         signal: controller.signal,

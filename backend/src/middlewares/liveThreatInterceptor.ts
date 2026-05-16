@@ -46,6 +46,10 @@ const EXCLUDED_PATHS = [
   "/api/logs",
   "/api/alerts",
   "/api/auth",
+  "/api/ai",
+  "/api/scanner",
+  "/api/training",
+  "/api/overview",
   "/socket.io"
 ];
 
