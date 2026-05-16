@@ -126,12 +126,10 @@ function getSystemPrompt(context: string): string {
 }
 
 router.post("/chat", async (req: Request, res: Response): Promise<void> => {
-  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   try {
@@ -172,22 +170,30 @@ Keep the content technically precise, actionable, and evidence-based.`;
     const streamBody = await fetchGroqStream(messages);
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const lines = decoder.decode(value, { stream: true }).split('\n');
-      for (const line of lines) {
-        if (!line.trim().startsWith("data: ")) continue;
-        const dataStr = line.replace("data: ", "").trim();
-        if (dataStr === "[DONE]") break;
-        try {
-          const chunk = JSON.parse(dataStr);
-          const content = chunk.choices[0]?.delta?.content || "";
-          if (content) {
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
-          }
-        } catch (e) {}
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = decoder.decode(value, { stream: true }).split('\n');
+        for (const line of lines) {
+          if (!line.trim().startsWith("data: ")) continue;
+          const dataStr = line.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") break;
+          try {
+            const chunk = JSON.parse(dataStr);
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) {
+              res.write(`data: ${JSON.stringify({ content })}\n\n`);
+            }
+          } catch (e) {}
+        }
       }
+    } catch (streamErr) {
+      console.error("[Stream Parse Error]", streamErr);
+      res.write(`data: ${JSON.stringify({ error: "Stream reading interrupted." })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
     }
 
     res.write("data: [DONE]\n\n");
@@ -201,12 +207,10 @@ Keep the content technically precise, actionable, and evidence-based.`;
 });
 
 router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
-  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   try {
@@ -240,23 +244,31 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
     const reader = streamBody.getReader();
     const decoder = new TextDecoder();
     let fullResponse = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const lines = decoder.decode(value, { stream: true }).split('\n');
-      for (const line of lines) {
-        if (!line.trim().startsWith("data: ")) continue;
-        const dataStr = line.replace("data: ", "").trim();
-        if (dataStr === "[DONE]") break;
-        try {
-          const chunk = JSON.parse(dataStr);
-          const text = chunk.choices[0]?.delta?.content || "";
-          if (text) {
-            fullResponse += text;
-            sendEvent({ type: "chunk", content: text });
-          }
-        } catch (e) {}
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = decoder.decode(value, { stream: true }).split('\n');
+        for (const line of lines) {
+          if (!line.trim().startsWith("data: ")) continue;
+          const dataStr = line.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") break;
+          try {
+            const chunk = JSON.parse(dataStr);
+            const text = chunk.choices[0]?.delta?.content || "";
+            if (text) {
+              fullResponse += text;
+              sendEvent({ type: "chunk", content: text });
+            }
+          } catch (e) {}
+        }
       }
+    } catch (streamErr) {
+      console.error("[Stream Parse Error]", streamErr);
+      sendEvent({ type: "error", message: "Stream reading interrupted." });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
     }
 
     sendEvent({

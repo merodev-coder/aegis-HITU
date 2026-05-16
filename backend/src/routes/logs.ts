@@ -307,86 +307,94 @@ async function processLogStream(logContent: string, req: Request, res: Response,
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const decoded = decoder.decode(value, { stream: true });
-        
-        const decodedLines = decoded.split('\n');
-        for (const line of decodedLines) {
-          if (!line.trim().startsWith("data: ")) continue;
-          const dataStr = line.replace("data: ", "").trim();
-          if (dataStr === "[DONE]") break;
-          try {
-            const chunk = JSON.parse(dataStr);
-            const text = chunk.choices[0]?.delta?.content || "";
-            buffer += text;
-          } catch (e) {}
-        }
-
-        let startIdx = buffer.indexOf('{');
-        while (startIdx !== -1) {
-          let depth = 0;
-          let inString = false;
-          let isEscaped = false;
-          let endIdx = -1;
-
-          for (let j = startIdx; j < buffer.length; j++) {
-            const char = buffer[j];
-            if (char === '"' && !isEscaped) {
-              inString = !inString;
-            } else if (char === '\\' && inString) {
-              isEscaped = !isEscaped;
-            } else {
-              isEscaped = false;
-            }
-
-            if (!inString) {
-              if (char === '{') depth++;
-              else if (char === '}') depth--;
-
-              if (depth === 0) {
-                endIdx = j;
-                break;
-              }
-            }
-          }
-
-          if (endIdx !== -1) {
-            const jsonStr = buffer.substring(startIdx, endIdx + 1);
-            buffer = buffer.substring(endIdx + 1);
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const decoded = decoder.decode(value, { stream: true });
+          
+          const decodedLines = decoded.split('\n');
+          for (const line of decodedLines) {
+            if (!line.trim().startsWith("data: ")) continue;
+            const dataStr = line.replace("data: ", "").trim();
+            if (dataStr === "[DONE]") break;
             try {
-              const parsedAlert = JSON.parse(jsonStr);
-              const mappedAlert = mapAiAlert(parsedAlert);
+              const chunk = JSON.parse(dataStr);
+              const text = chunk.choices[0]?.delta?.content || "";
+              buffer += text;
+            } catch (e) {}
+          }
 
-              const clientAlert = {
-                id: Math.random().toString(36).substring(7),
-                severity: mappedAlert.severity,
-                type: mappedAlert.attackType,
-                sourceIp: mappedAlert.sourceIp,
-                targetUrl: mappedAlert.targetUrl,
-                timestamp: new Date(mappedAlert.time).toISOString().replace("T", " ").substring(0, 19),
-                analysis: mappedAlert.analysis,
-                logSnippet: mappedAlert.rawLog
-              };
+          let startIdx = buffer.indexOf('{');
+          while (startIdx !== -1) {
+            let depth = 0;
+            let inString = false;
+            let isEscaped = false;
+            let endIdx = -1;
 
-              sendEvent({ type: "alert", data: clientAlert });
-
-              if (mappedAlert.severity.toLowerCase() !== "safe") {
-                validateAndSaveAlert(parsedAlert, fileName).then((saved) => {
-                  if (saved) {
-                    const io = req.app.get("io");
-                    if (io) io.to("secure_alerts").emit("liveAlert", formatAlertForClient(saved));
-                  }
-                }).catch(err => console.error("[SSE DB Save Error]", err));
+            for (let j = startIdx; j < buffer.length; j++) {
+              const char = buffer[j];
+              if (char === '"' && !isEscaped) {
+                inString = !inString;
+              } else if (char === '\\' && inString) {
+                isEscaped = !isEscaped;
+              } else {
+                isEscaped = false;
               }
-            } catch {
+
+              if (!inString) {
+                if (char === '{') depth++;
+                else if (char === '}') depth--;
+
+                if (depth === 0) {
+                  endIdx = j;
+                  break;
+                }
+              }
             }
-            startIdx = buffer.indexOf('{');
-          } else {
-            break;
+
+            if (endIdx !== -1) {
+              const jsonStr = buffer.substring(startIdx, endIdx + 1);
+              buffer = buffer.substring(endIdx + 1);
+              try {
+                const parsedAlert = JSON.parse(jsonStr);
+                const mappedAlert = mapAiAlert(parsedAlert);
+
+                const clientAlert = {
+                  id: Math.random().toString(36).substring(7),
+                  severity: mappedAlert.severity,
+                  type: mappedAlert.attackType,
+                  sourceIp: mappedAlert.sourceIp,
+                  targetUrl: mappedAlert.targetUrl,
+                  timestamp: new Date(mappedAlert.time).toISOString().replace("T", " ").substring(0, 19),
+                  analysis: mappedAlert.analysis,
+                  logSnippet: mappedAlert.rawLog
+                };
+
+                sendEvent({ type: "alert", data: clientAlert });
+
+                if (mappedAlert.severity.toLowerCase() !== "safe") {
+                  validateAndSaveAlert(parsedAlert, fileName).then((saved) => {
+                    if (saved) {
+                      const io = req.app.get("io");
+                      if (io) io.to("secure_alerts").emit("liveAlert", formatAlertForClient(saved));
+                    }
+                  }).catch(err => console.error("[SSE DB Save Error]", err));
+                }
+              } catch {
+              }
+              startIdx = buffer.indexOf('{');
+            } else {
+              break;
+            }
           }
         }
+      } catch (streamErr) {
+        console.error("[Stream Parse Error]", streamErr);
+        sendEvent({ type: "error", message: "Stream reading interrupted." });
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
       }
     }
 
@@ -405,12 +413,10 @@ async function processLogStream(logContent: string, req: Request, res: Response,
 }
 
 router.post("/upload-stream", upload.single("file"), async (req: Request, res: Response): Promise<void> => {
-  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   try {
@@ -491,12 +497,10 @@ async function isAllowedUrl(input: string): Promise<boolean> {
 }
 
 router.post("/scan-url-stream", async (req: Request, res: Response): Promise<void> => {
-  res.setHeader("Access-Control-Allow-Origin", "https://aegis-ai-hitu.netlify.app");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   try {
