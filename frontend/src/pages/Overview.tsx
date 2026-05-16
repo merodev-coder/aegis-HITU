@@ -70,7 +70,7 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch("/api/overview/stats")
+    apiFetch("/api/overview/stats", { credentials: "include" })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch stats");
         return res.json();
@@ -97,7 +97,16 @@ export default function Overview() {
     );
   }
 
-  if (!stats) return null;
+  if (!stats) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <AlertCircle className="h-10 w-10 text-[#ff3b30]/50" />
+          <p className="text-sm font-mono text-white/50">Unable to load security metrics.</p>
+        </div>
+      </div>
+    );
+  }
 
   const { totalThreats, statusCounts, sourceDistribution, recentActivity } = stats;
 
