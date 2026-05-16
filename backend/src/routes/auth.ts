@@ -116,8 +116,8 @@ router.post("/register", authLimiter, async (req: Request, res: Response): Promi
 
     res.cookie("aegis_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: true,
+      sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -173,8 +173,8 @@ router.post("/login", authLimiter, async (req: Request, res: Response): Promise<
 
     res.cookie("aegis_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: true,
+      sameSite: "none",
       maxAge: 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -299,7 +299,7 @@ router.post("/reset-password", authLimiter, async (req: Request, res: Response):
 });
 
 router.post("/logout", (_req: Request, res: Response) => {
-  res.clearCookie("aegis_token", { path: "/" });
+  res.clearCookie("aegis_token", { path: "/", httpOnly: true, secure: true, sameSite: "none" });
   res.status(200).json({ message: "Logged out successfully" });
 });
 
