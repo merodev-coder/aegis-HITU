@@ -6,7 +6,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { toast } from "react-hot-toast";
 import rehypeSanitize from "rehype-sanitize";
-import { apiFetch } from "../lib/api";
+import { useNavigate } from "react-router-dom";
 
 interface Message {
   id: string;
@@ -48,6 +48,7 @@ export default function AIChat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const navigate = useNavigate();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -89,13 +90,26 @@ export default function AIChat() {
     ]);
 
     try {
-      const response = await apiFetch("/api/ai/chat", {
+      const baseUrl = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+      const response = await fetch(`${baseUrl}/api/ai/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({ message: userMessage.content }),
       });
+
+      if (!response.ok) {
+        let errorMsg = `Server error (${response.status})`;
+        try {
+          const errData = await response.json();
+          if (errData.error || errData.message) {
+            errorMsg = errData.error || errData.message;
+          }
+        } catch (_) {}
+        throw new Error(errorMsg);
+      }
 
       if (!response.body) throw new Error("No response body");
 
@@ -143,9 +157,16 @@ export default function AIChat() {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Chat Error:", error);
-      toast.error("Failed to connect to Aegis AI.");
+      toast.error(error.message || "Failed to connect to Aegis AI.");
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: `⚠️ Error: ${error.message || "Connection failed. Please check your network and try again."}` }
+            : msg
+        )
+      );
     } finally {
       setIsLoading(false);
     }

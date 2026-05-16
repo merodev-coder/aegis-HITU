@@ -33,23 +33,13 @@ const PORT = process.env.PORT || 5000;
 
 app.set("trust proxy", false);
 
-const allowedOrigins = [
-  "https://aegis-ai-hitu.netlify.app",
-  "http://localhost:5173",
-  "http://localhost:3000"
-];
-
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      callback(null, true);
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
 );
 
@@ -100,7 +90,9 @@ app.use((err: AppError, _req: Request, res: Response, _next: NextFunction) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      callback(null, true);
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
   },
