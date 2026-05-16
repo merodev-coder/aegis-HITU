@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_URL || "";
+export const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
 export class ApiError extends Error {
   status: number;
@@ -16,7 +16,8 @@ export async function apiFetch(
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const url = `${API_BASE}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${API_BASE}${normalizedPath}`;
   const controller = options.signal ? undefined : new AbortController();
   const timeoutId = controller
     ? setTimeout(() => controller.abort(), 30000)
