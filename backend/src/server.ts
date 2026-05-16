@@ -33,15 +33,12 @@ const PORT = process.env.PORT || 5000;
 
 app.set("trust proxy", false);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      callback(null, true);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  })
-);
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 app.use(helmet());
 app.use(cookieParser());
