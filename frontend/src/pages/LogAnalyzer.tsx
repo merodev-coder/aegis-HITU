@@ -176,7 +176,7 @@ export default function LogAnalyzer() {
       const fileContent = await selectedFile.text();
 
       const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
-      const response = await fetch(`${API_URL}/api/logs/upload-stream`, {
+      const response = await fetch(`${API_URL}/api/analyze-log-text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ logData: fileContent, fileName: selectedFile.name }),
