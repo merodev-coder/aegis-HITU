@@ -90,11 +90,7 @@ app.post("/api/analyze-log-text", express.json({ limit: "10mb" }), async (req: R
     const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
     const AI_MODEL = "llama-3.3-70b-versatile";
 
-    const systemPrompt = `You are Aegis AI — a SECURITY THREAT ANALYZER. You analyze server logs to detect attacks.
-Your ENTIRE response must be a stream of independent JSON objects (NDJSON). Output ONE JSON object per line.
-DO NOT output arrays, markdown, or conversational text.
-If NO malicious payload is present, classify as severity: "safe" and threat_type: "None".
-Format per line: {"severity":"safe|low|medium|high|critical","threat_type":"SQL Injection|XSS|Path Traversal|Command Injection|None","source_ip":"<ip>","target_url":"<url>","timestamp":"<iso8601>","log_snippet":"<raw log>","analysis":"<1-sentence>"}`;
+    const systemPrompt = `You are Aegis AI — a SECURITY THREAT ANALYZER. You analyze server logs to detect attacks. Return a single JSON object containing an array called alerts: {"alerts": [ { "severity": "safe|low|medium|high|critical", "threat_type": "SQL Injection|XSS|Path Traversal|Command Injection|None", "source_ip": "<ip>", "target_url": "<url>", "timestamp": "<iso8601>", "log_snippet": "<raw log>", "analysis": "<1-sentence>" } ]}`;
 
     const lines = logData.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
     if (lines.length === 0) {
@@ -104,98 +100,63 @@ Format per line: {"severity":"safe|low|medium|high|critical","threat_type":"SQL 
       return;
     }
 
-    sendEvent({ type: "status", message: `Found ${lines.length} log lines. Starting analysis...` });
+    const uniqueLines = [...new Set(lines)];
+    const batch = uniqueLines.slice(-300).join("\n");
 
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < lines.length; i += BATCH_SIZE) {
-      const batch = lines.slice(i, i + BATCH_SIZE).join("\n");
-      sendEvent({ type: "status", message: `Analyzing lines ${i + 1}-${Math.min(i + BATCH_SIZE, lines.length)} of ${lines.length}...` });
+    sendEvent({ type: "status", message: `Analyzing ${uniqueLines.slice(-300).length} log lines...` });
 
-      const groqRes = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+    const groqRes = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: batch },
+        ],
+        stream: false,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!groqRes.ok) {
+      sendEvent({ type: "error", message: "AI Analysis Failed." });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    const completion = await groqRes.json() as any;
+    const responseText = completion.choices?.[0]?.message?.content || "{}";
+    const cleanJson = responseText.replace(/^```json\s*|```$/g, "").trim();
+    
+    let parsed;
+    try {
+      parsed = JSON.parse(cleanJson);
+    } catch {
+      parsed = { alerts: [] };
+    }
+
+    const alerts = parsed.alerts || [];
+    for (const parsedAlert of alerts) {
+      const sev = (typeof parsedAlert.severity === "string" ? parsedAlert.severity : "medium").toLowerCase();
+      const sanitize = (s: unknown) => typeof s === "string" ? s.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+      sendEvent({
+        type: "alert",
+        data: {
+          id: Math.random().toString(36).substring(7),
+          severity: ["safe","low","medium","high","critical"].includes(sev) ? sev : "medium",
+          type: sanitize(parsedAlert.threat_type) || "Detected Anomaly",
+          sourceIp: sanitize(parsedAlert.source_ip) || "Unknown",
+          targetUrl: sanitize(parsedAlert.target_url) || "Unknown",
+          timestamp: !isNaN(Date.parse(parsedAlert.timestamp as string)) ? parsedAlert.timestamp : new Date().toISOString(),
+          analysis: sanitize(parsedAlert.analysis) || "",
+          logSnippet: sanitize(parsedAlert.log_snippet) || "",
         },
-        body: JSON.stringify({
-          model: AI_MODEL,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: batch },
-          ],
-          stream: true,
-        }),
       });
-
-      if (!groqRes.ok || !groqRes.body) {
-        sendEvent({ type: "status", message: `Batch ${i + 1} failed, skipping...` });
-        continue;
-      }
-
-      const reader = groqRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const decoded = decoder.decode(value, { stream: true });
-        const decodedLines = decoded.split("\n");
-        for (const line of decodedLines) {
-          if (!line.trim().startsWith("data: ")) continue;
-          const dataStr = line.replace("data: ", "").trim();
-          if (dataStr === "[DONE]") break;
-          try {
-            const chunk = JSON.parse(dataStr);
-            const text = chunk.choices[0]?.delta?.content || "";
-            buffer += text;
-          } catch {}
-        }
-
-        let startIdx = buffer.indexOf("{");
-        while (startIdx !== -1) {
-          let depth = 0;
-          let inStr = false;
-          let esc = false;
-          let endIdx = -1;
-          for (let j = startIdx; j < buffer.length; j++) {
-            const c = buffer[j];
-            if (c === '"' && !esc) inStr = !inStr;
-            else if (c === "\\" && inStr) esc = !esc;
-            else esc = false;
-            if (!inStr) {
-              if (c === "{") depth++;
-              else if (c === "}") depth--;
-              if (depth === 0) { endIdx = j; break; }
-            }
-          }
-          if (endIdx !== -1) {
-            const jsonStr = buffer.substring(startIdx, endIdx + 1);
-            buffer = buffer.substring(endIdx + 1);
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const sev = (typeof parsed.severity === "string" ? parsed.severity : "medium").toLowerCase();
-              const sanitize = (s: unknown) => typeof s === "string" ? s.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
-              sendEvent({
-                type: "alert",
-                data: {
-                  id: Math.random().toString(36).substring(7),
-                  severity: ["safe","low","medium","high","critical"].includes(sev) ? sev : "medium",
-                  type: sanitize(parsed.threat_type) || "Detected Anomaly",
-                  sourceIp: sanitize(parsed.source_ip) || "Unknown",
-                  targetUrl: sanitize(parsed.target_url) || "Unknown",
-                  timestamp: !isNaN(Date.parse(parsed.timestamp as string)) ? parsed.timestamp : new Date().toISOString(),
-                  analysis: sanitize(parsed.analysis) || "",
-                  logSnippet: sanitize(parsed.log_snippet) || "",
-                },
-              });
-            } catch {}
-            startIdx = buffer.indexOf("{");
-          } else {
-            break;
-          }
-        }
-      }
     }
 
     sendEvent({ type: "status", message: "Analysis complete." });

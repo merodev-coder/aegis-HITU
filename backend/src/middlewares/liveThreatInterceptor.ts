@@ -113,8 +113,8 @@ BODY: ${requestData.body}`;
 
       let parsedAlert;
       try {
-        const cleanText = aiText.replace(/^```json/, '').replace(/```$/, '').trim();
-        parsedAlert = JSON.parse(cleanText);
+        const cleanJson = aiText.replace(/^```json\s*|```$/g, "").trim();
+        parsedAlert = JSON.parse(cleanJson);
       } catch {
         console.error("[Live Interceptor] Failed to parse AI JSON:", aiText);
         return;

@@ -315,13 +315,9 @@ router.post("/analyze-phishing", async (req: Request, res: Response): Promise<vo
     ];
     const response = await fetchGroq(messages, true);
 
-    let jsonString = response.choices[0]?.message?.content || "";
-
-    if (jsonString.startsWith("```json")) {
-      jsonString = jsonString.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-    }
-
-    const parsedResponse = JSON.parse(jsonString);
+    const rawContent = response.choices?.[0]?.message?.content || "{}";
+    const cleanJson = rawContent.replace(/^```json\s*|```$/g, "").trim();
+    const parsedResponse = JSON.parse(cleanJson);
 
     if (parsedResponse.riskScore >= 50) {
       try {

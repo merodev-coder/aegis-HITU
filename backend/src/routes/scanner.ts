@@ -124,7 +124,8 @@ Return ONLY a JSON object matching this schema:
         const response = await fetchGroq(messages, true);
 
         const rawContent = response.choices?.[0]?.message?.content || "{}";
-        const result = JSON.parse(rawContent);
+        const cleanJson = rawContent.replace(/^```json\s*|```$/g, "").trim();
+        const result = JSON.parse(cleanJson);
 
         if (result.hasVulnerability && result.severity !== "None") {
           sendEvent({
