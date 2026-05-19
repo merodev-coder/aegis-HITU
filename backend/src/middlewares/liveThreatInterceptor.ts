@@ -1,45 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Alert from "../models/Alert";
-
-const AI_MODEL = "llama-3.3-70b-versatile";
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-
-async function fetchGroq(messages: any[], jsonFormat = false): Promise<any> {
-  const body: any = { model: AI_MODEL, messages, stream: false };
-  if (jsonFormat) body.response_format = { type: "json_object" };
-  const response = await fetch(GROQ_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
-    },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) {
-    let errText = "";
-    try { errText = await response.text(); } catch(e) {}
-    throw new Error(`Groq API Error ${response.status}: ${errText}`);
-  }
-  return response.json();
-}
-
-async function fetchGroqStream(messages: any[]): Promise<any> {
-  const response = await fetch(GROQ_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
-    },
-    body: JSON.stringify({ model: AI_MODEL, messages, stream: true })
-  });
-  if (!response.ok) {
-    let errText = "";
-    try { errText = await response.text(); } catch(e) {}
-    throw new Error(`Groq API Error ${response.status}: ${errText}`);
-  }
-  return response.body;
-}
-
+import { fetchGroq, getAiMessageContent, parseAiJson } from "../services/groq";
 
 const EXCLUDED_PATHS = [
   "/api/health",
@@ -50,7 +11,7 @@ const EXCLUDED_PATHS = [
   "/api/scanner",
   "/api/training",
   "/api/overview",
-  "/socket.io"
+  "/socket.io",
 ];
 
 function isExcludedPath(requestPath: string): boolean {
@@ -79,7 +40,6 @@ const SYSTEM_PROMPT = `You are Aegis AI — a SECURITY THREAT ANALYZER. You anal
 Now analyze the following HTTP request:`;
 
 export const liveThreatInterceptor = (req: Request, res: Response, next: NextFunction) => {
-
   if (isExcludedPath(req.path)) {
     return next();
   }
@@ -89,7 +49,7 @@ export const liveThreatInterceptor = (req: Request, res: Response, next: NextFun
     url: req.originalUrl || req.url,
     ip: req.ip || req.socket.remoteAddress || "Unknown",
     userAgent: req.headers["user-agent"] || "Unknown",
-    body: req.body ? JSON.stringify(req.body).substring(0, 1000) : "None"
+    body: req.body ? JSON.stringify(req.body).substring(0, 1000) : "None",
   };
 
   const requestString = `METHOD: ${requestData.method}
@@ -103,20 +63,23 @@ BODY: ${requestData.body}`;
   (async () => {
     try {
       const messages = [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: requestString },
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: requestString },
       ];
       const response = await fetchGroq(messages, true);
 
-      const aiText = (response.choices[0]?.message?.content || "").trim();
-      if (!aiText) return;
+      const rawText = getAiMessageContent(response);
+      if (!rawText || rawText === "{}") return;
 
-      let parsedAlert;
+      let parsedAlert: {
+        severity?: string;
+        threat_type?: string;
+        analysis?: string;
+      };
       try {
-        const cleanJson = aiText.replace(/^```json\s*|```$/g, "").trim();
-        parsedAlert = JSON.parse(cleanJson);
+        parsedAlert = parseAiJson(rawText);
       } catch {
-        console.error("[Live Interceptor] Failed to parse AI JSON:", aiText);
+        console.error("[Live Interceptor] Failed to parse AI JSON:", rawText);
         return;
       }
 
@@ -134,7 +97,7 @@ BODY: ${requestData.body}`;
         statusCode: res.statusCode || undefined,
         rawLog: requestString,
         timestamp: new Date(),
-        analysis: parsedAlert.analysis || ""
+        analysis: parsedAlert.analysis || "",
       };
 
       const newAlert = new Alert(alertObj);
@@ -152,11 +115,10 @@ BODY: ${requestData.body}`;
           statusCode: newAlert.statusCode,
           timestamp: newAlert.timestamp.toISOString().replace("T", " ").substring(0, 19),
           analysis: alertObj.analysis,
-          logSnippet: newAlert.rawLog
+          logSnippet: newAlert.rawLog,
         };
         io.to("secure_alerts").emit("liveAlert", clientAlert);
       }
-
     } catch (err) {
       console.error("[Live Interceptor] Async analysis error:", err);
     }

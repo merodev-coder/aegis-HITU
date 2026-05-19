@@ -18,6 +18,7 @@ import overviewRoutes from "./routes/overview";
 import { liveThreatInterceptor } from "./middlewares/liveThreatInterceptor";
 import { requireAuth } from "./middlewares/auth";
 import connectDB from "./config/db";
+import { processLogStream, sanitizeForLlm } from "./services/log-filter";
 
 dotenv.config();
 
@@ -87,82 +88,8 @@ app.post("/api/analyze-log-text", express.json({ limit: "10mb" }), async (req: R
       return;
     }
 
-    const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-    const AI_MODEL = "llama-3.3-70b-versatile";
-
-    const systemPrompt = `You are Aegis AI — a SECURITY THREAT ANALYZER. You analyze server logs to detect attacks. Return a single JSON object containing an array called alerts: {"alerts": [ { "severity": "safe|low|medium|high|critical", "threat_type": "SQL Injection|XSS|Path Traversal|Command Injection|None", "source_ip": "<ip>", "target_url": "<url>", "timestamp": "<iso8601>", "log_snippet": "<raw log>", "analysis": "<1-sentence>" } ]}`;
-
-    const lines = logData.split("\n").map((l: string) => l.trim()).filter((l: string) => l.length > 0);
-    if (lines.length === 0) {
-      sendEvent({ type: "error", message: "Log file is empty." });
-      res.write("data: [DONE]\n\n");
-      res.end();
-      return;
-    }
-
-    const uniqueLines = [...new Set(lines)];
-    const batch = uniqueLines.slice(-300).join("\n");
-
-    sendEvent({ type: "status", message: `Analyzing ${uniqueLines.slice(-300).length} log lines...` });
-
-    const groqRes = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: batch },
-        ],
-        stream: false,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!groqRes.ok) {
-      sendEvent({ type: "error", message: "AI Analysis Failed." });
-      res.write("data: [DONE]\n\n");
-      res.end();
-      return;
-    }
-
-    const completion = await groqRes.json() as any;
-    const responseText = completion.choices?.[0]?.message?.content || "{}";
-    const cleanJson = responseText.replace(/^```json\s*|```$/g, "").trim();
-    
-    let parsed;
-    try {
-      parsed = JSON.parse(cleanJson);
-    } catch {
-      parsed = { alerts: [] };
-    }
-
-    const alerts = parsed.alerts || [];
-    for (const parsedAlert of alerts) {
-      const sev = (typeof parsedAlert.severity === "string" ? parsedAlert.severity : "medium").toLowerCase();
-      const sanitize = (s: unknown) => typeof s === "string" ? s.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
-      sendEvent({
-        type: "alert",
-        data: {
-          id: Math.random().toString(36).substring(7),
-          severity: ["safe","low","medium","high","critical"].includes(sev) ? sev : "medium",
-          type: sanitize(parsedAlert.threat_type) || "Detected Anomaly",
-          sourceIp: sanitize(parsedAlert.source_ip) || "Unknown",
-          targetUrl: sanitize(parsedAlert.target_url) || "Unknown",
-          timestamp: !isNaN(Date.parse(parsedAlert.timestamp as string)) ? parsedAlert.timestamp : new Date().toISOString(),
-          analysis: sanitize(parsedAlert.analysis) || "",
-          logSnippet: sanitize(parsedAlert.log_snippet) || "",
-        },
-      });
-    }
-
-    sendEvent({ type: "status", message: "Analysis complete." });
-    sendEvent({ type: "complete", message: "Analysis finished." });
-    res.write("data: [DONE]\n\n");
-    res.end();
+    const logContent = sanitizeForLlm(logData);
+    await processLogStream(logContent, req, res, sendEvent, fileName);
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[Analyze Log Text Error]", errMsg);
