@@ -18,7 +18,7 @@ import overviewRoutes from "./routes/overview";
 import { liveThreatInterceptor } from "./middlewares/liveThreatInterceptor";
 import { requireAuth } from "./middlewares/auth";
 import connectDB from "./config/db";
-import { processLogStream, sanitizeForLlm } from "./services/log-filter";
+import { delay, fetchGroq, getAiMessageContent, parseAiJson } from "./utils/aiHelper";
 
 dotenv.config();
 
@@ -77,9 +77,12 @@ app.post("/api/analyze-log-text", express.json({ limit: "10mb" }), async (req: R
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
 
+  const validSeverities = ["safe", "low", "medium", "high", "critical"];
+  const BATCH_SIZE = 25;
+  const systemPrompt = `You are Aegis AI — a SECURITY THREAT ANALYZER. Analyze the provided log lines and return EXACTLY ONE JSON object with no markdown and no code fences. Schema: {"alerts":[{"severity":"safe|low|medium|high|critical","threat_type":"SQL Injection|XSS|Path Traversal|Command Injection|User-Agent Injection|None","source_ip":"<ip>","target_url":"<url>","timestamp":"<iso8601>","log_snippet":"<snippet>","analysis":"<1 sentence>"}]}. Include one alert object per input line. Classify as safe when no malicious payload is visible.`;
+
   try {
     const logData = req.body?.logData;
-    const fileName = req.body?.fileName || "Uploaded Log";
 
     if (!logData || typeof logData !== "string" || !logData.trim()) {
       sendEvent({ type: "error", message: "No log data provided." });
@@ -88,8 +91,72 @@ app.post("/api/analyze-log-text", express.json({ limit: "10mb" }), async (req: R
       return;
     }
 
-    const logContent = sanitizeForLlm(logData);
-    await processLogStream(logContent, req, res, sendEvent, fileName);
+    const uniqueLines = [
+      ...new Set(
+        logData
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.length > 0)
+      ),
+    ].slice(-150);
+
+    if (uniqueLines.length === 0) {
+      sendEvent({ type: "error", message: "No log data provided." });
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    for (let i = 0; i < uniqueLines.length; i += BATCH_SIZE) {
+      const chunk = uniqueLines.slice(i, i + BATCH_SIZE);
+      const startLine = i + 1;
+      const endLine = Math.min(i + BATCH_SIZE, uniqueLines.length);
+
+      sendEvent({ type: "status", message: `Analyzing lines ${startLine} to ${endLine}...` });
+
+      try {
+        const messages = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: chunk.join("\n") },
+        ];
+        const response = await fetchGroq(messages, true);
+        const rawText = getAiMessageContent(response);
+        const parsedData = parseAiJson<{ alerts?: Array<Record<string, unknown>> }>(rawText, { alerts: [] });
+        const alerts = Array.isArray(parsedData.alerts) ? parsedData.alerts : [];
+
+        for (const alert of alerts) {
+          const sev =
+            typeof alert.severity === "string" ? alert.severity.toLowerCase() : "medium";
+          const sanitize = (value: unknown) =>
+            typeof value === "string" ? value.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+
+          sendEvent({
+            type: "alert",
+            data: {
+              id: Math.random().toString(36).substring(7),
+              severity: validSeverities.includes(sev) ? sev : "medium",
+              type: sanitize(alert.threat_type) || "Detected Anomaly",
+              sourceIp: sanitize(alert.source_ip) || "Unknown",
+              targetUrl: sanitize(alert.target_url) || "Unknown",
+              timestamp: !isNaN(Date.parse(String(alert.timestamp ?? "")))
+                ? alert.timestamp
+                : new Date().toISOString(),
+              analysis: sanitize(alert.analysis) || "",
+              logSnippet: sanitize(alert.log_snippet) || "",
+            },
+          });
+        }
+      } catch (chunkErr) {
+        console.error("[Analyze Log Text Chunk Error]", chunkErr);
+        continue;
+      }
+
+      await delay(1500);
+    }
+
+    sendEvent({ type: "complete", message: "Analysis complete." });
+    res.write("data: [DONE]\n\n");
+    res.end();
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("[Analyze Log Text Error]", errMsg);
